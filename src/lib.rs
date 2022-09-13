@@ -290,4 +290,35 @@ mod tests {
 
         assert!(res.is_ok(), "ohlc should resolve");
     }
+
+    #[test]
+    fn get_url_without_api_key() {
+        let client: CoinGeckoClient = CoinGeckoClient::new("https://some.url");
+
+        assert_eq!(
+            client.get_url("/endpoint", None),
+            "https://some.url/endpoint",
+        );
+
+        assert_eq!(
+            client.get_url("/endpoint", Some("?param_key=value")),
+            "https://some.url/endpoint?param_key=value",
+        );
+    }
+
+    #[test]
+    fn get_url_with_api_key() {
+        let client: CoinGeckoClient =
+            CoinGeckoClient::new_with_api_key("https://some.url", "fake_api_key");
+
+        assert_eq!(
+            client.get_url("/endpoint", None),
+            "https://some.url/endpoint?x_cg_pro_api_key=fake_api_key",
+        );
+
+        assert_eq!(
+            client.get_url("/endpoint", Some("?param_key=value")),
+            "https://some.url/endpoint?param_key=value&x_cg_pro_api_key=fake_api_key",
+        );
+    }
 }

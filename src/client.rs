@@ -36,6 +36,7 @@ use crate::response::{
 /// CoinGecko client
 pub struct CoinGeckoClient {
     host: &'static str,
+    api_key: Option<&'static str>,
 }
 
 /// Creates a new CoinGeckoClient with host https://api.coingecko.com/api/v3
@@ -62,11 +63,64 @@ impl CoinGeckoClient {
     /// let client = CoinGeckoClient::new("https://some.url");
     /// ```
     pub fn new(host: &'static str) -> Self {
-        CoinGeckoClient { host }
+        CoinGeckoClient {
+            host,
+            api_key: None,
+        }
     }
 
-    async fn get<R: DeserializeOwned>(&self, endpoint: &str) -> Result<R, Error> {
-        reqwest::get(format!("{host}/{ep}", host = self.host, ep = endpoint))
+    /// Creates a new CoinGeckoClient client with a custom host url and API key
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use coingecko::CoinGeckoClient;
+    /// let client = CoinGeckoClient::new_with_api_key("https://some.url", "123456789");
+    /// ```
+    pub fn new_with_api_key(host: &'static str, api_key: &'static str) -> Self {
+        CoinGeckoClient {
+            host,
+            api_key: Some(api_key),
+        }
+    }
+
+    /// Gets a URL for the provided endpoint and optional params.
+    /// The endpoint must be prefixed with a /.
+    /// If params are specified, they must be prefixed with a ?.
+    /// If an API key is present, the x_cg_pro_api_key param is added.
+    pub fn get_url(&self, endpoint: &str, params: Option<&str>) -> String {
+        let api_key_param = self
+            .api_key
+            .and_then(|api_key| Some(format!("x_cg_pro_api_key={}", api_key)));
+
+        let params = if let Some(p) = params {
+            // Append the API key param if required
+            format!(
+                "{params}{api_key_param}",
+                params = p,
+                api_key_param = api_key_param.map_or_else(|| "".into(), |key| format!("&{}", key)),
+            )
+        } else {
+            // Supply the API key param if required
+            format!(
+                "{api_key_param}",
+                api_key_param = api_key_param.map_or_else(|| "".into(), |key| format!("?{}", key)),
+            )
+        };
+        format!(
+            "{host}{ep}{params}",
+            host = self.host,
+            ep = endpoint,
+            params = { params }
+        )
+    }
+
+    async fn get<R: DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        params: Option<&str>,
+    ) -> Result<R, Error> {
+        reqwest::get(self.get_url(endpoint, params))
             .await?
             .json()
             .await
@@ -86,7 +140,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn ping(&self) -> Result<SimplePing, Error> {
-        self.get("/ping").await
+        self.get("/ping", None).await
     }
 
     /// Get the current price of any cryptocurrencies in any other supported currencies that you need
@@ -113,8 +167,9 @@ impl CoinGeckoClient {
     ) -> Result<HashMap<String, Price>, Error> {
         let ids = ids.iter().map(AsRef::as_ref).collect::<Vec<_>>();
         let vs_currencies = vs_currencies.iter().map(AsRef::as_ref).collect::<Vec<_>>();
-        let req = format!("/simple/price?ids={}&vs_currencies={}&include_market_cap={}&include_24hr_vol={}&include_24hr_change={}&include_last_updated_at={}", ids.join("%2C"), vs_currencies.join("%2C"), include_market_cap, include_24hr_vol, include_24hr_change, include_last_updated_at);
-        self.get(&req).await
+        let endpoint = "/simple/price";
+        let params = format!("?ids={}&vs_currencies={}&include_market_cap={}&include_24hr_vol={}&include_24hr_change={}&include_last_updated_at={}", ids.join("%2C"), vs_currencies.join("%2C"), include_market_cap, include_24hr_vol, include_24hr_change, include_last_updated_at);
+        self.get(endpoint, Some(&params)).await
     }
 
     /// Get current price of tokens (using contract addresses) for a given platform in any other currency that you need
@@ -154,8 +209,9 @@ impl CoinGeckoClient {
             .map(AsRef::as_ref)
             .collect::<Vec<_>>();
         let vs_currencies = vs_currencies.iter().map(AsRef::as_ref).collect::<Vec<_>>();
-        let req = format!("/simple/token_price/{}?contract_addresses={}&vs_currencies={}&include_market_cap={}&include_24hr_vol={}&include_24hr_change={}&include_last_updated_at={}", id, contract_addresses.join("%2C"), vs_currencies.join("%2C"), include_market_cap, include_24hr_vol, include_24hr_change, include_last_updated_at);
-        self.get(&req).await
+        let endpoint = format!("/simple/token_price/{}", id);
+        let params = format!("?contract_addresses={}&vs_currencies={}&include_market_cap={}&include_24hr_vol={}&include_24hr_change={}&include_last_updated_at={}", contract_addresses.join("%2C"), vs_currencies.join("%2C"), include_market_cap, include_24hr_vol, include_24hr_change, include_last_updated_at);
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// Get list of supported_vs_currencies
@@ -172,7 +228,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn supported_vs_currencies(&self) -> Result<SupportedVsCurrencies, Error> {
-        self.get("/simple/supported_vs_currencies").await
+        self.get("/simple/supported_vs_currencies", None).await
     }
 
     /// List all supported coins id, name and symbol (no pagination required)
@@ -191,8 +247,9 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn coins_list(&self, include_platform: bool) -> Result<Vec<CoinsListItem>, Error> {
-        let req = format!("/coins/list?include_platform={}", include_platform);
-        self.get(&req).await
+        let endpoint = "/coins/list";
+        let params = format!("?include_platform={}", include_platform);
+        self.get(endpoint, Some(&params)).await
     }
 
     /// List all supported coins price, market cap, volume, and market related data
@@ -276,8 +333,9 @@ impl CoinGeckoClient {
             },
         );
 
-        let req = format!("/coins/markets?vs_currency={}&ids={}{}&order={}&per_page={}&page={}&sparkline={}&price_change_percentage={}", vs_currency, ids.join("%2C"), category, order, per_page, page, sparkline, price_change_percentage.join("%2C"));
-        self.get(&req).await
+        let endpoint = "/coins/markets";
+        let params = format!("?vs_currency={}&ids={}{}&order={}&per_page={}&page={}&sparkline={}&price_change_percentage={}", vs_currency, ids.join("%2C"), category, order, per_page, page, sparkline, price_change_percentage.join("%2C"));
+        self.get(endpoint, Some(&params)).await
     }
 
     /// Get current data (name, price, market, ... including exchange tickers) for a coin
@@ -309,8 +367,9 @@ impl CoinGeckoClient {
         developer_data: bool,
         sparkline: bool,
     ) -> Result<CoinsItem, Error> {
-        let req = format!("/coins/{}?localization={}&tickers={}&market_data={}&community_data={}&developer_data={}&sparkline={}", id, localization, tickers, market_data, community_data, developer_data, sparkline);
-        self.get(&req).await
+        let endpoint = format!("/coins/{}", id);
+        let params = format!("?localization={}&tickers={}&market_data={}&community_data={}&developer_data={}&sparkline={}", localization, tickers, market_data, community_data, developer_data, sparkline);
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// Get coin tickers (paginated to 100 items)
@@ -346,18 +405,26 @@ impl CoinGeckoClient {
             TickersOrder::VolumeDesc => "volume_desc",
         };
 
-        let req = match exchange_ids {
+        let endpoint = format!("/coins/{}/tickers", id,);
+        let params = match exchange_ids {
             Some(e_ids) => {
                 let e_ids = e_ids.iter().map(AsRef::as_ref).collect::<Vec<_>>();
-                format!("/coins/{}/tickers?exchange_ids={}&include_exchange_logo={}&page={}&order={}&depth={}", id, e_ids.join("%2C"), include_exchange_logo, &page, order, depth)
+                format!(
+                    "?exchange_ids={}&include_exchange_logo={}&page={}&order={}&depth={}",
+                    e_ids.join("%2C"),
+                    include_exchange_logo,
+                    &page,
+                    order,
+                    depth
+                )
             }
             None => format!(
-                "/coins/{}/tickers?include_exchange_logo={}&page={}&order={}&depth={}",
-                id, include_exchange_logo, &page, order, depth
+                "?include_exchange_logo={}&page={}&order={}&depth={}",
+                include_exchange_logo, &page, order, depth
             ),
         };
 
-        self.get(&req).await
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// Get historical data (name, price, market, stats) at a given date for a coin
@@ -382,11 +449,9 @@ impl CoinGeckoClient {
     ) -> Result<History, Error> {
         let formatted_date = date.format("%d-%m-%Y").to_string();
 
-        let req = format!(
-            "/coins/{}/history?date={}&localization={}",
-            id, formatted_date, localization
-        );
-        self.get(&req).await
+        let endpoint = format!("/coins/{}/history", id,);
+        let params = format!("?date={}&localization={}", formatted_date, localization);
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// Get historical market data include price, market cap, and 24h volume (granularity auto)
@@ -411,18 +476,13 @@ impl CoinGeckoClient {
         days: i64,
         use_daily_interval: bool,
     ) -> Result<MarketChart, Error> {
-        let req = match use_daily_interval {
-            true => format!(
-                "/coins/{}/market_chart?vs_currency={}&days={}",
-                id, vs_currency, days
-            ),
-            false => format!(
-                "/coins/{}/market_chart?vs_currency={}&days={}&interval=daily",
-                id, vs_currency, days
-            ),
+        let endpoint = format!("/coins/{}/market_chart", id);
+        let params = match use_daily_interval {
+            true => format!("?vs_currency={}&days={}", vs_currency, days),
+            false => format!("?vs_currency={}&days={}&interval=daily", vs_currency, days),
         };
 
-        self.get(&req).await
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// Get historical market data include price, market cap, and 24h volume within a range of timestamp (granularity auto)
@@ -457,11 +517,12 @@ impl CoinGeckoClient {
         let from_unix_timestamp = from.timestamp();
         let to_unix_timestamp = to.timestamp();
 
-        let req = format!(
-            "/coins/{}/market_chart/range?vs_currency={}&from={}&to={}",
-            id, vs_currency, from_unix_timestamp, to_unix_timestamp
+        let endpoint = format!("/coins/{}/market_chart/range", id,);
+        let params = format!(
+            "?vs_currency={}&from={}&to={}",
+            vs_currency, from_unix_timestamp, to_unix_timestamp
         );
-        self.get(&req).await
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// Get coin's OHLC
@@ -497,11 +558,9 @@ impl CoinGeckoClient {
             OhlcDays::ThreeHundredSixtyFiveDays => 365,
         };
 
-        let req = format!(
-            "/coins/{}/ohlc?vs_currency={}&days={}",
-            id, vs_currency, days
-        );
-        self.get(&req).await
+        let endpoint = format!("/coins/{}/ohlc", id,);
+        let params = format!("?vs_currency={}&days={}", vs_currency, days);
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// Get coin info from contract address
@@ -519,8 +578,8 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn contract(&self, id: &str, contract_address: &str) -> Result<Contract, Error> {
-        let req = format!("/coins/{}/contract/{}", id, contract_address);
-        self.get(&req).await
+        let endpoint = format!("/coins/{}/contract/{}", id, contract_address);
+        self.get(&endpoint, None).await
     }
 
     /// Get historical market data include price, market cap, and 24h volume (granularity auto)
@@ -544,11 +603,9 @@ impl CoinGeckoClient {
         vs_currency: &str,
         days: i64,
     ) -> Result<MarketChart, Error> {
-        let req = format!(
-            "/coins/{}/contract/{}/market_chart/?vs_currency={}&days={}",
-            id, contract_address, vs_currency, days
-        );
-        self.get(&req).await
+        let endpoint = format!("/coins/{}/contract/{}/market_chart/", id, contract_address,);
+        let params = format!("?vs_currency={}&days={}", vs_currency, days);
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// Get historical market data include price, market cap, and 24h volume within a range of timestamp (granularity auto)
@@ -580,11 +637,15 @@ impl CoinGeckoClient {
         let from_unix_timestamp = from.timestamp();
         let to_unix_timestamp = to.timestamp();
 
-        let req = format!(
-            "/coins/{}/contract/{}/market_chart/range?vs_currency={}&from={}&to={}",
-            id, contract_address, vs_currency, from_unix_timestamp, to_unix_timestamp
+        let endpoint = format!(
+            "/coins/{}/contract/{}/market_chart/range",
+            id, contract_address
         );
-        self.get(&req).await
+        let params = format!(
+            "?vs_currency={}&from={}&to={}",
+            vs_currency, from_unix_timestamp, to_unix_timestamp
+        );
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// List all asset platforms (Blockchain networks)
@@ -601,7 +662,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn asset_platforms(&self) -> Result<Vec<AssetPlatform>, Error> {
-        self.get("/asset_platforms").await
+        self.get("/asset_platforms", None).await
     }
 
     /// List all categories
@@ -618,7 +679,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn categories_list(&self) -> Result<Vec<CategoryId>, Error> {
-        self.get("/coins/categories/list").await
+        self.get("/coins/categories/list", None).await
     }
 
     /// List all categories with market data
@@ -635,7 +696,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn categories(&self) -> Result<Vec<Category>, Error> {
-        self.get("/coins/categories").await
+        self.get("/coins/categories", None).await
     }
 
     /// List all exchanges
@@ -652,8 +713,9 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn exchanges(&self, per_page: i64, page: i64) -> Result<Vec<Exchange>, Error> {
-        let req = format!("/exchanges?per_page={}&page={}", per_page, page);
-        self.get(&req).await
+        let endpoint = "/exchanges";
+        let params = format!("?per_page={}&page={}", per_page, page);
+        self.get(endpoint, Some(&params)).await
     }
 
     /// List all supported markets id and name (no pagination required)
@@ -672,7 +734,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn exchanges_list(&self) -> Result<Vec<ExchangeId>, Error> {
-        self.get("/exchanges/list").await
+        self.get("/exchanges/list", None).await
     }
 
     /// Get exchange volume in BTC and top 100 tickers only
@@ -695,8 +757,8 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn exchange(&self, id: &str) -> Result<Exchange, Error> {
-        let req = format!("/exchanges/{}", id);
-        self.get(&req).await
+        let endpoint = format!("/exchanges/{}", id);
+        self.get(&endpoint, None).await
     }
 
     /// Get exchange tickers (paginated)
@@ -732,18 +794,26 @@ impl CoinGeckoClient {
             TickersOrder::VolumeDesc => "volume_desc",
         };
 
-        let req = match coin_ids {
+        let endpoint = format!("/exchanges/{}/tickers", id);
+        let params = match coin_ids {
             Some(c_ids) => {
                 let c_ids = c_ids.iter().map(AsRef::as_ref).collect::<Vec<_>>();
-                format!("/exchanges/{}/tickers?coin_ids={}&include_exchange_logo={}&page={}&order={}&depth={}", id, c_ids.join("%2C"), include_exchange_logo, &page, order, depth)
+                format!(
+                    "?coin_ids={}&include_exchange_logo={}&page={}&order={}&depth={}",
+                    c_ids.join("%2C"),
+                    include_exchange_logo,
+                    &page,
+                    order,
+                    depth
+                )
             }
             None => format!(
-                "/exchanges/{}/tickers?include_exchange_logo={}&page={}&order={}&depth={}",
-                id, include_exchange_logo, &page, order, depth
+                "?include_exchange_logo={}&page={}&order={}&depth={}",
+                include_exchange_logo, &page, order, depth
             ),
         };
 
-        self.get(&req).await
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// Get status updates for a given exchange
@@ -765,12 +835,10 @@ impl CoinGeckoClient {
         per_page: i64,
         page: i64,
     ) -> Result<StatusUpdates, Error> {
-        let req = format!(
-            "/exchanges/{}/status_updates?per_page={}&page={}",
-            id, per_page, page,
-        );
+        let endpoint = format!("/exchanges/{}/status_updates", id,);
+        let params = format!("?per_page={}&page={}", per_page, page,);
 
-        self.get(&req).await
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// Get volume_chart data for a given exchange
@@ -791,8 +859,9 @@ impl CoinGeckoClient {
         id: &str,
         days: i64,
     ) -> Result<Vec<VolumeChartData>, Error> {
-        let req = format!("/exchanges/{}/volume_chart?days={}", id, days);
-        self.get(&req).await
+        let endpoint = format!("/exchanges/{}/volume_chart", id);
+        let params = format!("?days={}", days);
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// List all finance platforms
@@ -813,9 +882,10 @@ impl CoinGeckoClient {
         per_page: i64,
         page: i64,
     ) -> Result<Vec<FinancePlatform>, Error> {
-        let req = format!("/finance_platforms?per_page={}&page={}", per_page, page,);
+        let endpoint = "/finance_platforms";
+        let params = format!("?per_page={}&page={}", per_page, page,);
 
-        self.get(&req).await
+        self.get(endpoint, Some(&params)).await
     }
 
     /// List all finance products
@@ -836,9 +906,10 @@ impl CoinGeckoClient {
         per_page: i64,
         page: i64,
     ) -> Result<Vec<FinanceProduct>, Error> {
-        let req = format!("/finance_products?per_page={}&page={}", per_page, page,);
+        let endpoint = "/finance_products";
+        let params = format!("?per_page={}&page={}", per_page, page,);
 
-        self.get(&req).await
+        self.get(endpoint, Some(&params)).await
     }
 
     /// List all market indexes
@@ -855,9 +926,10 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn indexes(&self, per_page: i64, page: i64) -> Result<Vec<Index>, Error> {
-        let req = format!("/indexes?per_page={}&page={}", per_page, page,);
+        let endpoint = "/indexes";
+        let params = format!("?per_page={}&page={}", per_page, page,);
 
-        self.get(&req).await
+        self.get(endpoint, Some(&params)).await
     }
 
     /// Get market index by market id and index id
@@ -874,8 +946,8 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn indexes_market_id(&self, market_id: &str, id: &str) -> Result<MarketIndex, Error> {
-        let req = format!("/indexes/{}/{}", market_id, id);
-        self.get(&req).await
+        let endpoint = format!("/indexes/{}/{}", market_id, id);
+        self.get(&endpoint, None).await
     }
 
     /// List market indexes id and name
@@ -892,7 +964,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn indexes_list(&self) -> Result<Vec<IndexId>, Error> {
-        self.get("/indexes/list").await
+        self.get("/indexes/list", None).await
     }
 
     /// List all derivative tickers
@@ -920,8 +992,9 @@ impl CoinGeckoClient {
             None => "unexpired",
         };
 
-        let req = format!("/derivatives?include_tickers={}", include_tickers);
-        self.get(&req).await
+        let endpoint = "/derivatives";
+        let params = format!("?include_tickers={}", include_tickers);
+        self.get(endpoint, Some(&params)).await
     }
 
     /// List all derivative exchanges
@@ -952,11 +1025,9 @@ impl CoinGeckoClient {
             DerivativeExchangeOrder::TradeVolume24hBtcDesc => "trade_volume_24h_btc_desc",
         };
 
-        let req = format!(
-            "/derivatives/exchanges?order={}&per_page={}&page={}",
-            order, per_page, page
-        );
-        self.get(&req).await
+        let endpoint = "/derivatives/exchanges";
+        let params = format!("?order={}&per_page={}&page={}", order, per_page, page);
+        self.get(endpoint, Some(&params)).await
     }
 
     /// Show derivative exchange data
@@ -985,11 +1056,9 @@ impl CoinGeckoClient {
             None => "unexpired",
         };
 
-        let req = format!(
-            "/derivatives/exchanges/{}?include_tickers={}",
-            id, include_tickers
-        );
-        self.get(&req).await
+        let endpoint = format!("/derivatives/exchanges/{}", id);
+        let params = format!("?include_tickers={}", include_tickers);
+        self.get(&endpoint, Some(&params)).await
     }
 
     /// List all derivative exchanges name and identifier
@@ -1006,7 +1075,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn derivative_exchanges_list(&self) -> Result<Vec<DerivativeExchangeId>, Error> {
-        self.get("/derivatives/exchanges/list").await
+        self.get("/derivatives/exchanges/list", None).await
     }
 
     /// List all status_updates with data (description, category, created_at, user, user_title and pin)
@@ -1042,9 +1111,10 @@ impl CoinGeckoClient {
         params.push(per_page.to_string());
         params.push(page.to_string());
 
-        let req = format!("/status_updates?{}", params.join("&"));
+        let endpoint = "/status_updates";
+        let params = format!("?{}", params.join("&"));
 
-        self.get(&req).await
+        self.get(endpoint, Some(&params)).await
     }
 
     /// Get events, paginated by 100
@@ -1086,8 +1156,9 @@ impl CoinGeckoClient {
         let from_date = from_date.format("%Y-%m-%d").to_string();
         let to_date = to_date.format("%Y-%m-%d").to_string();
 
-        let req = format!(
-            "/events?{}&page={}&upcoming_events_only={}&from_date={}&to_date={}",
+        let endpoint = "/events";
+        let params = format!(
+            "?{}&page={}&upcoming_events_only={}&from_date={}&to_date={}",
             params.join("&"),
             page,
             upcoming_events_only,
@@ -1095,7 +1166,7 @@ impl CoinGeckoClient {
             to_date,
         );
 
-        self.get(&req).await
+        self.get(endpoint, Some(&params)).await
     }
 
     /// Get list of event countries
@@ -1112,7 +1183,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn event_countries(&self) -> Result<EventCountries, Error> {
-        self.get("/events/types").await
+        self.get("/events/types", None).await
     }
 
     /// Get list of event types
@@ -1129,7 +1200,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn event_types(&self) -> Result<EventTypes, Error> {
-        self.get("/events/types").await
+        self.get("/events/types", None).await
     }
 
     /// Get BTC-to-Currency exchange rates
@@ -1146,7 +1217,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn exchange_rates(&self) -> Result<ExchangeRates, Error> {
-        self.get("/exchange_rates").await
+        self.get("/exchange_rates", None).await
     }
 
     /// Top-7 trending coins on CoinGecko as searched by users in the last 24 hours (Ordered by most popular first)
@@ -1163,7 +1234,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn trending(&self) -> Result<Trending, Error> {
-        self.get("/search/trending").await
+        self.get("/search/trending", None).await
     }
 
     /// Get cryptocurrency global data
@@ -1180,7 +1251,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn global(&self) -> Result<Global, Error> {
-        self.get("/global").await
+        self.get("/global", None).await
     }
 
     /// Get Top 100 Cryptocurrency Global Eecentralized Finance(defi) data
@@ -1197,7 +1268,7 @@ impl CoinGeckoClient {
     /// }
     /// ```
     pub async fn global_defi(&self) -> Result<GlobalDefi, Error> {
-        self.get("/global/decentralized_finance_defi").await
+        self.get("/global/decentralized_finance_defi", None).await
     }
 
     /// Get public companies bitcoin or ethereum holdings (Ordered by total holdings descending)
@@ -1217,11 +1288,11 @@ impl CoinGeckoClient {
         &self,
         coin_id: CompaniesCoinId,
     ) -> Result<CompaniesPublicTreasury, Error> {
-        let req = match coin_id {
-            CompaniesCoinId::Bitcoin => "/companies/public_treasury/bitcoin".to_string(),
-            CompaniesCoinId::Ethereum => "/companies/public_treasury/ethereum".to_string(),
+        let endpoint = match coin_id {
+            CompaniesCoinId::Bitcoin => "/companies/public_treasury/bitcoin",
+            CompaniesCoinId::Ethereum => "/companies/public_treasury/ethereum",
         };
 
-        self.get(&req).await
+        self.get(endpoint, None).await
     }
 }
