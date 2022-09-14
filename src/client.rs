@@ -35,8 +35,8 @@ use crate::response::{
 
 /// CoinGecko client
 pub struct CoinGeckoClient {
-    host: &'static str,
-    api_key: Option<&'static str>,
+    host: String,
+    api_key: Option<String>,
 }
 
 /// Creates a new CoinGeckoClient with host https://api.coingecko.com/api/v3
@@ -49,7 +49,7 @@ pub struct CoinGeckoClient {
 /// ```
 impl Default for CoinGeckoClient {
     fn default() -> Self {
-        CoinGeckoClient::new("https://api.coingecko.com/api/v3")
+        CoinGeckoClient::new("https://api.coingecko.com/api/v3".into())
     }
 }
 
@@ -60,9 +60,9 @@ impl CoinGeckoClient {
     ///
     /// ```rust
     /// use coingecko::CoinGeckoClient;
-    /// let client = CoinGeckoClient::new("https://some.url");
+    /// let client = CoinGeckoClient::new("https://some.url".into());
     /// ```
-    pub fn new(host: &'static str) -> Self {
+    pub fn new(host: String) -> Self {
         CoinGeckoClient {
             host,
             api_key: None,
@@ -75,9 +75,9 @@ impl CoinGeckoClient {
     ///
     /// ```rust
     /// use coingecko::CoinGeckoClient;
-    /// let client = CoinGeckoClient::new_with_key("https://some.url", "123456789");
+    /// let client = CoinGeckoClient::new_with_key("https://some.url".into(), "123456789".into());
     /// ```
-    pub fn new_with_key(host: &'static str, api_key: &'static str) -> Self {
+    pub fn new_with_key(host: String, api_key: String) -> Self {
         CoinGeckoClient {
             host,
             api_key: Some(api_key),
@@ -92,7 +92,7 @@ impl CoinGeckoClient {
     /// - `endpoint`: API endpoint, must be prefixed with a /. e.g. `"/simple/price"`.
     /// - `params`: API endpoint parameters to append, they must be prefixed with a `'?'`. e.g. `"?ids=1"`.
     pub fn get_url(&self, endpoint: &str, params: Option<&str>) -> String {
-        let params = match (params, self.api_key) {
+        let params = match (params, self.api_key.as_ref()) {
             (Some(p), Some(k)) => format!("{p}&x_cg_pro_api_key={k}"),
             (Some(p), None) => p.into(),
             (None, Some(k)) => format!("?x_cg_pro_api_key={k}"),
