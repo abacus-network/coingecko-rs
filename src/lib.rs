@@ -309,7 +309,7 @@ mod tests {
     #[test]
     fn get_url_with_api_key() {
         let client: CoinGeckoClient =
-            CoinGeckoClient::new_with_api_key("https://some.url", "fake_api_key");
+            CoinGeckoClient::new_with_key("https://some.url", "fake_api_key");
 
         assert_eq!(
             client.get_url("/endpoint", None),

@@ -75,9 +75,9 @@ impl CoinGeckoClient {
     ///
     /// ```rust
     /// use coingecko::CoinGeckoClient;
-    /// let client = CoinGeckoClient::new_with_api_key("https://some.url", "123456789");
+    /// let client = CoinGeckoClient::new_with_key("https://some.url", "123456789");
     /// ```
-    pub fn new_with_api_key(host: &'static str, api_key: &'static str) -> Self {
+    pub fn new_with_key(host: &'static str, api_key: &'static str) -> Self {
         CoinGeckoClient {
             host,
             api_key: Some(api_key),
@@ -85,28 +85,20 @@ impl CoinGeckoClient {
     }
 
     /// Gets a URL for the provided endpoint and optional params.
-    /// The endpoint must be prefixed with a /.
-    /// If params are specified, they must be prefixed with a ?.
-    /// If an API key is present, the x_cg_pro_api_key param is added.
+    ///
+    /// **Note:** If an API key is present, the `x_cg_pro_api_key` param is added automatically.
+    /// this will be appended to `params` if necessary.
+    ///
+    /// - `endpoint`: API endpoint, must be prefixed with a /. e.g. `"/simple/price"`.
+    /// - `params`: API endpoint parameters to append, they must be prefixed with a `'?'`. e.g. `"?ids=1"`.
     pub fn get_url(&self, endpoint: &str, params: Option<&str>) -> String {
-        let api_key_param = self
-            .api_key
-            .and_then(|api_key| Some(format!("x_cg_pro_api_key={}", api_key)));
-
-        let params = if let Some(p) = params {
-            // Append the API key param if required
-            format!(
-                "{params}{api_key_param}",
-                params = p,
-                api_key_param = api_key_param.map_or_else(|| "".into(), |key| format!("&{}", key)),
-            )
-        } else {
-            // Supply the API key param if required
-            format!(
-                "{api_key_param}",
-                api_key_param = api_key_param.map_or_else(|| "".into(), |key| format!("?{}", key)),
-            )
+        let params = match (params, self.api_key) {
+            (Some(p), Some(k)) => format!("{p}&x_cg_pro_api_key={k}"),
+            (Some(p), None) => p.into(),
+            (None, Some(k)) => format!("?x_cg_pro_api_key={k}"),
+            (None, None) => "".into(),
         };
+
         format!(
             "{host}{ep}{params}",
             host = self.host,
